@@ -8,7 +8,7 @@
  *
  * Constants:
  *   - DELAY: Main loop delay in milliseconds.
- *   - PIN_STROBE, PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT, PIN_A, PIN_B: Pin assignments for MSX joystick signals.
+ *   - PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT, PIN_A, PIN_B: Pin assignments for MSX joystick signals.
  *   - CONTROLLER_LIMIT: Maximum number of controllers allowed to connect.
  *   - controllerList: Array holding pointers to connected controllers.
  *
@@ -35,15 +35,27 @@
  */
 #include <Bluepad32.h>
 
+enum PlayerIndex {
+    PLAYER_1,
+    PLAYER_2
+};
+
+enum PinIndex {
+  PIN_UP,
+  PIN_DOWN,
+  PIN_LEFT,
+  PIN_RIGHT,
+  PIN_A,
+  PIN_B
+};
+
+const int PLAYER_PINS[2][6] = {
+  {23, 19, 18, 5, 22, 21},
+  {4, 14, 15, 27, 26, 25}
+};
+
 const int DELAY = 15;
-const int PIN_STROBE = D0;
-const int PIN_UP = D1;
-const int PIN_DOWN = D2;
-const int PIN_LEFT = D3;
-const int PIN_RIGHT = D4;
-const int PIN_A = D5;
-const int PIN_B = D6;
-const int CONTROLLER_LIMIT = 1;
+const int CONTROLLER_LIMIT = 2;
 ControllerPtr controllerList[BP32_MAX_GAMEPADS];
 
 int controllerCount = 0;
@@ -144,6 +156,22 @@ void onDisconnectedController(ControllerPtr ctl) {
         BP32.enableNewBluetoothConnections(true);
 }
 
+
+/**
+ * @brief Forgets all connected controllers and resets controller state.
+ *
+ * This function sets all entries in the controller list to nullptr,
+ * resets the controller count to zero, clears stored Bluetooth keys,
+ * and enables new Bluetooth connections.
+ */
+void onForgetAllControllers() {
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
+        controllerList[i] = nullptr;
+    controllerCount = 0;
+    BP32.forgetBluetoothKeys();
+    BP32.enableNewBluetoothConnections(true);
+}
+
 /**
  * @brief Processes controller input and updates MSX-compatible output pins.
  *
@@ -161,6 +189,12 @@ void processMSX(ControllerPtr ctl, int index) {
     int32_t axisX = ctl->axisX();
     int32_t axisY = ctl->axisY();
     uint16_t buttons = ctl->buttons();
+    uint16_t misc = ctl->miscButtons();
+
+    if (misc == MISC_BUTTON_SELECT && misc == MISC_BUTTON_START) {
+        onForgetAllControllers();
+        return;
+    }
 
     bool up = dpad == DPAD_UP || axisY < -127;
     bool down = dpad == DPAD_DOWN || axisY > 127;
@@ -176,22 +210,22 @@ void processMSX(ControllerPtr ctl, int index) {
     bool rt = buttons == BUTTON_TRIGGER_R;
 
     if (up != press_up) {
-        setPin(PIN_UP, up);
+        setPin(PLAYER_PINS[index][PIN_UP], up);
         press_up = up;
     }
 
     if (down != press_down) {
-        setPin(PIN_DOWN, down);
+        setPin(PLAYER_PINS[index][PIN_DOWN], down);
         press_down = down;
     }
     
     if (left != press_left) {
-        setPin(PIN_LEFT, left);
+        setPin(PLAYER_PINS[index][PIN_LEFT], left);
         press_left = left;
     }
 
     if (right != press_right) {
-        setPin(PIN_RIGHT, right);
+        setPin(PLAYER_PINS[index][PIN_RIGHT], right);
         press_right = right;
     }
 
@@ -231,7 +265,7 @@ void processMSX(ControllerPtr ctl, int index) {
     }
 
     if (a != press_a) {
-        setPin(PIN_A, a);
+        setPin(PLAYER_PINS[index][PIN_A], a);
         press_a = a;
     }
 
@@ -271,7 +305,7 @@ void processMSX(ControllerPtr ctl, int index) {
     }
 
     if (b != press_b) {
-        setPin(PIN_B, b);
+        setPin(PLAYER_PINS[index][PIN_B], b);
         press_b = b;
     }
 }
@@ -290,13 +324,9 @@ void setup() {
     BP32.forgetBluetoothKeys();
     BP32.enableVirtualDevice(false);
 
-    setPin(PIN_STROBE, false);
-    setPin(PIN_UP, false);
-    setPin(PIN_DOWN, false);
-    setPin(PIN_LEFT, false);
-    setPin(PIN_RIGHT, false);
-    setPin(PIN_A, false);
-    setPin(PIN_B, false);
+    for (int i = 0 ; i < CONTROLLER_LIMIT ; i++)
+        for (int j = 0 ; j < 6 ; j++)
+            setPin(PLAYER_PINS[i][j], false);
 }
 
 /**

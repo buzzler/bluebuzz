@@ -1,45 +1,96 @@
 # BlueBuzz
 
-BlueBuzz는 Bluetooth 게임패드를 MSX 스타일 디지털 입력으로 변환하는 Arduino 프로젝트입니다. Bluepad32 라이브러리를 활용하여 Bluetooth 컨트롤러의 입력을 MSX 조이스틱 인터페이스에 맞게 디지털 핀으로 매핑합니다.
+BlueBuzz is an Arduino project that enables Bluetooth gamepads to interface with MSX-style digital joystick inputs. Using the Bluepad32 library, BlueBuzz translates modern controller inputs into signals compatible with retro MSX hardware, supporting turbo functionality, rumble feedback, and multi-controller management.
 
-## 주요 기능
+## Features
 
-- Bluetooth 게임패드 연결 및 입력 처리
-- MSX 조이스틱 신호(DPAD, A/B 버튼 등)로 매핑
-- A/B 버튼 터보(연타) 기능 및 속도 조절
-- 터보 속도 조절 시 진동 피드백 제공
-- 최대 연결 컨트롤러 수 제한
-- Bluepad32 기반, 가상 디바이스 비활성화
+- **Bluetooth Gamepad Support:** Connect up to two Bluetooth controllers simultaneously.
+- **MSX Joystick Emulation:** Maps controller inputs to MSX joystick pins for seamless retro gaming.
+- **Turbo Functionality:** Adjustable rapid-fire for A/B buttons using shoulder and trigger controls.
+- **Rumble Feedback:** Provides tactile feedback when turbo settings are changed or limits are reached.
+- **Controller Management:** Automatically handles connection/disconnection and enforces a connection limit.
+- **Forget All Controllers:** Reset all connections using SELECT + START.
 
-## 핀 배치
+## Hardware Requirements
 
-| 기능      | 핀 번호 |
-|-----------|--------|
-| STROBE    | D0     |
-| UP        | D1     |
-| DOWN      | D2     |
-| LEFT      | D3     |
-| RIGHT     | D4     |
-| A 버튼    | D5     |
-| B 버튼    | D6     |
+- ESP32-based board (compatible with Bluepad32)
+- MSX or similar retro hardware expecting digital joystick inputs
+- Bluetooth gamepad(s) (e.g., Xbox, PlayStation, Switch Pro, etc.)
+- Wiring from ESP32 pins to MSX joystick port
 
-## 사용법
+## Pin Mapping
 
-1. Arduino에 BlueBuzz.ino를 업로드합니다.
-2. Bluetooth 게임패드를 페어링하여 연결합니다.
-3. 게임패드 입력이 MSX 조이스틱 핀에 디지털 신호로 출력됩니다.
-4. 어깨/트리거 버튼으로 터보 속도를 조절할 수 있습니다.
-5. 터보 속도 조절 시 컨트롤러에 진동 피드백이 발생합니다.
+Each player uses a set of six pins for MSX joystick signals:
 
-## 의존성
+| Signal | Player 1 Pin | Player 2 Pin |
+|--------|--------------|--------------|
+| UP     | 23           | 4            |
+| DOWN   | 19           | 14           |
+| LEFT   | 18           | 15           |
+| RIGHT  | 5            | 27           |
+| A      | 22           | 26           |
+| B      | 21           | 25           |
 
-- [Bluepad32](https://github.com/ricardoquesada/bluepad32) 라이브러리
+## Installation
 
-## 라이선스
+1. **Clone the Repository:**  
+    Download or clone the BlueBuzz project files to your Arduino workspace.
 
-MIT License
+2. **Install Bluepad32 Library:**  
+    Add the [Bluepad32](https://github.com/ricardoquesada/bluepad32) library to your Arduino IDE.
 
-## 참고
+3. **Connect Hardware:**  
+    Wire the ESP32 pins to your MSX joystick port according to the pin mapping above.
 
-- MSX 조이스틱 인터페이스에 대한 자세한 정보는 [MSX Wiki](https://www.msx.org/wiki/Joystick_Port) 참고
-- Bluepad32 공식 문서 및 예제 활용
+4. **Upload Sketch:**  
+    Open `BlueBuzz.ino` in Arduino IDE and upload to your ESP32 board.
+
+## Usage
+
+- **Connect Controllers:**  
+  Pair your Bluetooth gamepad(s) with the ESP32. Up to two controllers are supported.
+
+- **Play:**  
+  Controller inputs are mapped to MSX joystick signals. Use the gamepad as you would a classic joystick.
+
+- **Turbo Controls:**  
+  - Hold **L Shoulder** or **L Trigger** to decrease/increase turbo speed for A button.
+  - Hold **R Shoulder** or **R Trigger** to decrease/increase turbo speed for B button.
+  - Hold **X** (A turbo) or **Y** (B turbo) to activate turbo fire.
+
+- **Rumble Feedback:**  
+  Turbo speed changes at limits trigger controller rumble.
+
+- **Forget All Controllers:**  
+  Press **SELECT + START** together to disconnect all controllers and reset Bluetooth keys.
+
+## Customization
+
+- **Pin Assignments:**  
+  Modify the `PLAYER_PINS` array in the code to match your hardware setup.
+
+- **Turbo Settings:**  
+  Adjust initial turbo speeds and limits in the code (`turbo_a`, `turbo_b`, etc.).
+
+## Troubleshooting
+
+- **Controller Not Connecting:**  
+  Ensure your controller is compatible with Bluepad32 and Bluetooth is enabled on the ESP32.
+
+- **No Output on MSX:**  
+  Check wiring and pin assignments. Confirm the ESP32 is powered and running the sketch.
+
+- **Turbo Not Working:**  
+  Verify turbo buttons are mapped correctly and turbo speed is within allowed range.
+
+## License
+
+This project is provided under the MIT License. See LICENSE file for details.
+
+## Credits
+
+- [Bluepad32](https://github.com/ricardoquesada/bluepad32) by Ricardo Quesada
+- Inspired by MSX retro gaming community
+
+---
+Enjoy modern wireless controllers on your classic MSX hardware!
