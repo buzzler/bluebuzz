@@ -1,96 +1,72 @@
+README.md
+
 # BlueBuzz
 
-BlueBuzz is an Arduino project that enables Bluetooth gamepads to interface with MSX-style digital joystick inputs. Using the Bluepad32 library, BlueBuzz translates modern controller inputs into signals compatible with retro MSX hardware, supporting turbo functionality, rumble feedback, and multi-controller management.
+BlueBuzz is an Arduino-based project that enables Bluetooth gamepads and mice to interface with MSX computers via GPIO pins. It translates modern Bluetooth controller input into MSX-compatible joystick and mouse signals, supporting turbo fire, rumble feedback, and multiple controller profiles.
 
 ## Features
 
-- **Bluetooth Gamepad Support:** Connect up to two Bluetooth controllers simultaneously.
-- **MSX Joystick Emulation:** Maps controller inputs to MSX joystick pins for seamless retro gaming.
-- **Turbo Functionality:** Adjustable rapid-fire for A/B buttons using shoulder and trigger controls.
-- **Rumble Feedback:** Provides tactile feedback when turbo settings are changed or limits are reached.
-- **Controller Management:** Automatically handles connection/disconnection and enforces a connection limit.
-- **Forget All Controllers:** Reset all connections using SELECT + START.
+- **Bluetooth Gamepad Support:** Connects modern Bluetooth controllers to MSX hardware.
+- **Mouse Emulation:** Supports Bluetooth mice for MSX mouse input.
+- **Turbo Fire:** Adjustable turbo fire for buttons A and B, with speed control via shoulder/trigger buttons.
+- **Rumble Feedback:** Provides haptic feedback when turbo limits are reached.
+- **Multi-Controller Support:** Handles up to two controllers (configurable).
+- **Automatic Pin Management:** Dynamically sets GPIO pins for MSX joystick/mouse protocol.
+- **Bluetooth Key Management:** Easily forgets all paired devices via controller input.
 
 ## Hardware Requirements
 
-- ESP32-based board (compatible with Bluepad32)
-- MSX or similar retro hardware expecting digital joystick inputs
-- Bluetooth gamepad(s) (e.g., Xbox, PlayStation, Switch Pro, etc.)
-- Wiring from ESP32 pins to MSX joystick port
+- **Arduino Board:** ESP32-based board recommended (for Bluetooth support).
+- **Wiring:** Connect Arduino GPIO pins to MSX joystick/mouse port according to the `PLAYER_PINS` mapping in the code.
+- **Bluetooth Controllers:** Any compatible Bluetooth gamepad or mouse.
 
 ## Pin Mapping
 
-Each player uses a set of six pins for MSX joystick signals:
+The code uses the following pin mapping for two players:
 
-| Signal | Player 1 Pin | Player 2 Pin |
-|--------|--------------|--------------|
-| UP     | 23           | 4            |
-| DOWN   | 19           | 14           |
-| LEFT   | 18           | 15           |
-| RIGHT  | 5            | 27           |
-| A      | 22           | 26           |
-| B      | 21           | 25           |
+| Player | UP | DOWN | LEFT | RIGHT | A | B | OUT |
+|--------|----|------|------|-------|---|---|-----|
+| 1      | 23 | 19   | 18   | 5     | 22| 21| 32  |
+| 2      | 4  | 14   | 15   | 27    | 26| 25| 33  |
 
-## Installation
+Adjust the `PLAYER_PINS` array in the code if your wiring differs.
 
-1. **Clone the Repository:**  
-    Download or clone the BlueBuzz project files to your Arduino workspace.
+## Software Dependencies
 
-2. **Install Bluepad32 Library:**  
-    Add the [Bluepad32](https://github.com/ricardoquesada/bluepad32) library to your Arduino IDE.
+- [Bluepad32](https://github.com/ricardoquesada/Bluepad32): Bluetooth gamepad/mouse library for ESP32.
 
-3. **Connect Hardware:**  
-    Wire the ESP32 pins to your MSX joystick port according to the pin mapping above.
+## Setup
 
-4. **Upload Sketch:**  
-    Open `BlueBuzz.ino` in Arduino IDE and upload to your ESP32 board.
+1. **Install Bluepad32** on your Arduino IDE or PlatformIO environment.
+2. **Wire the Arduino** to the MSX joystick/mouse port as per the pin mapping.
+3. **Upload the `BlueBuzz.ino` sketch** to your ESP32 board.
+4. **Power on your MSX** and Arduino.
+5. **Pair your Bluetooth controller** (gamepad or mouse) with the Arduino. The device will rumble on successful connection.
+6. **Use the controller** to send joystick or mouse input to the MSX.
 
 ## Usage
 
-- **Connect Controllers:**  
-  Pair your Bluetooth gamepad(s) with the ESP32. Up to two controllers are supported.
-
-- **Play:**  
-  Controller inputs are mapped to MSX joystick signals. Use the gamepad as you would a classic joystick.
-
-- **Turbo Controls:**  
-  - Hold **L Shoulder** or **L Trigger** to decrease/increase turbo speed for A button.
-  - Hold **R Shoulder** or **R Trigger** to decrease/increase turbo speed for B button.
-  - Hold **X** (A turbo) or **Y** (B turbo) to activate turbo fire.
-
-- **Rumble Feedback:**  
-  Turbo speed changes at limits trigger controller rumble.
-
-- **Forget All Controllers:**  
-  Press **SELECT + START** together to disconnect all controllers and reset Bluetooth keys.
+- **Turbo Fire:** Hold `X` (for A) or `Y` (for B) to enable turbo. Adjust speed with shoulder/trigger buttons.
+- **Forget All Controllers:** Press both `SELECT` and `START` to clear all paired Bluetooth devices.
+- **Mouse Mode:** Connect a Bluetooth mouse; movement and button clicks are sent to the MSX.
 
 ## Customization
 
-- **Pin Assignments:**  
-  Modify the `PLAYER_PINS` array in the code to match your hardware setup.
-
-- **Turbo Settings:**  
-  Adjust initial turbo speeds and limits in the code (`turbo_a`, `turbo_b`, etc.).
+- **Controller Limit:** Change `CONTROLLER_LIMIT` to allow more controllers.
+- **Turbo Speed:** Adjust `turbo_a` and `turbo_b` defaults for different turbo rates.
+- **Pin Mapping:** Modify `PLAYER_PINS` for your hardware setup.
 
 ## Troubleshooting
 
-- **Controller Not Connecting:**  
-  Ensure your controller is compatible with Bluepad32 and Bluetooth is enabled on the ESP32.
-
-- **No Output on MSX:**  
-  Check wiring and pin assignments. Confirm the ESP32 is powered and running the sketch.
-
-- **Turbo Not Working:**  
-  Verify turbo buttons are mapped correctly and turbo speed is within allowed range.
+- **No Input:** Check wiring and ensure correct pin mapping.
+- **Bluetooth Issues:** Use the forget function to clear and re-pair devices.
+- **Lag/Delays:** Adjust `DELAY_JOYSTICK` and `DELAY_MOUSE` for optimal performance.
 
 ## License
 
-This project is provided under the MIT License. See LICENSE file for details.
+This project is open source. See the LICENSE file for details.
 
 ## Credits
 
-- [Bluepad32](https://github.com/ricardoquesada/bluepad32) by Ricardo Quesada
-- Inspired by MSX retro gaming community
-
----
-Enjoy modern wireless controllers on your classic MSX hardware!
+- Inspired by the MSX community and the Bluepad32 project.
+- Developed by [Your Name or GitHub handle].

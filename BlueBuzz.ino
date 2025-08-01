@@ -1,38 +1,3 @@
-/**
- * @file BlueBuzz.ino
- * @brief Arduino sketch for interfacing Bluetooth gamepads with MSX-style digital inputs.
- *
- * This program uses the Bluepad32 library to connect Bluetooth controllers and map their inputs
- * to digital pins, emulating an MSX joystick interface. It supports turbo functionality for A/B buttons,
- * rumble feedback, and limits the number of connected controllers.
- *
- * Constants:
- *   - DELAY: Main loop delay in milliseconds.
- *   - PIN_UP, PIN_DOWN, PIN_LEFT, PIN_RIGHT, PIN_A, PIN_B: Pin assignments for MSX joystick signals.
- *   - CONTROLLER_LIMIT: Maximum number of controllers allowed to connect.
- *   - controllerList: Array holding pointers to connected controllers.
- *
- * State Variables:
- *   - controllerCount: Number of currently connected controllers.
- *   - press_*: State flags for each button/direction.
- *   - turbo_a, turbo_b: Turbo speed settings for A/B buttons.
- *   - turbo_a_counter, turbo_b_counter: Counters for turbo button toggling.
- *
- * Functions:
- *   - setPin(pin, pressed): Sets pin mode and output based on button state.
- *   - setRumble(ctl, duration, strengthLeft, strengthRight): Triggers controller rumble feedback.
- *   - onConnectedController(ctl): Handles new controller connections and enforces connection limit.
- *   - onDisconnectedController(ctl): Handles controller disconnections and re-enables connections if below limit.
- *   - processMSX(ctl, index): Reads controller input, maps to MSX signals, manages turbo and rumble.
- *   - setup(): Initializes Bluepad32, pins, and disables virtual devices.
- *   - loop(): Main loop, updates controller states and processes input.
- *
- * Usage:
- *   - Connect a Bluetooth controller.
- *   - Controller inputs are mapped to MSX joystick pins.
- *   - Turbo functionality can be adjusted using shoulder/trigger buttons.
- *   - Rumble feedback is provided on turbo adjustment.
- */
 #include <Bluepad32.h>
 
 enum PlayerIndex {
@@ -46,18 +11,21 @@ enum PinIndex {
   PIN_LEFT,
   PIN_RIGHT,
   PIN_A,
-  PIN_B
+  PIN_B,
+  PIN_OUT
 };
 
-const int PLAYER_PINS[2][6] = {
-  {23, 19, 18, 5, 22, 21},
-  {4, 14, 15, 27, 26, 25}
+const int PLAYER_PINS[2][7] = {
+  {23, 19, 18, 5, 22, 21, 32},
+  {4, 14, 15, 27, 26, 25, 33}
 };
 
-const int DELAY = 15;
-const int CONTROLLER_LIMIT = 2;
+const int DELAY_JOYSTICK = 15;
+const int DELAY_MOUSE = 0;
+const int CONTROLLER_LIMIT = 1; // maximum 2
 ControllerPtr controllerList[BP32_MAX_GAMEPADS];
 
+int delay_ms = DELAY_JOYSTICK;
 int controllerCount = 0;
 bool press_up = false;
 bool press_down = false;
@@ -73,6 +41,9 @@ int turbo_a = 5;
 int turbo_b = 5;
 int turbo_a_counter = 0;
 int turbo_b_counter = 0;
+char mouse_x = 0;
+char mouse_y = 0;
+long timer;
 
 /**
  * @brief Sets the mode and state of a specified pin based on the pressed state.
@@ -184,7 +155,8 @@ void onForgetAllControllers() {
  * @param ctl Pointer to the controller interface.
  * @param index Index of the controller (unused in this function).
  */
-void processMSX(ControllerPtr ctl, int index) {
+void processJoystick(ControllerPtr ctl, int index) {
+    delay_ms = DELAY_JOYSTICK;
     uint8_t dpad = ctl->dpad();
     int32_t axisX = ctl->axisX();
     int32_t axisY = ctl->axisY();
@@ -311,6 +283,78 @@ void processMSX(ControllerPtr ctl, int index) {
 }
 
 /**
+ * @brief Sends a byte to the MSX system by splitting it into high and low nibbles and setting the appropriate pins.
+ *
+ * This function waits for the OUT pin of PLAYER_1 to go HIGH, then sets the control pins (RIGHT, LEFT, DOWN, UP)
+ * for the high nibble of the character 'c'. After the OUT pin goes LOW, it sets the control pins for the low nibble.
+ * If the operation takes too long (based on a timer), the function returns early.
+ *
+ * @param c The byte to send, split into high and low nibbles.
+ * @param index The player index to select the correct set of pins from PLAYER_PINS.
+ */
+void sendMSX(char c, int index) {
+    // Wait for OUT pin to go HIGH
+    while (digitalRead(PLAYER_PINS[PLAYER_1][PIN_OUT]) == LOW) {
+        if (millis() > timer) return;
+    }
+    // Set pins for high nibble
+    setPin(PLAYER_PINS[index][PIN_RIGHT], !(c & 0x80));
+    setPin(PLAYER_PINS[index][PIN_LEFT], !(c & 0x40));
+    setPin(PLAYER_PINS[index][PIN_DOWN], !(c & 0x20));
+    setPin(PLAYER_PINS[index][PIN_UP], !(c & 0x10));
+
+    // Wait for OUT pin to go LOW
+    while (digitalRead(PLAYER_PINS[PLAYER_1][PIN_OUT]) == HIGH) {
+        if (millis() > timer) return;
+    }
+    // Set pins for low nibble
+    setPin(PLAYER_PINS[index][PIN_RIGHT], !(c & 0x08));
+    setPin(PLAYER_PINS[index][PIN_LEFT], !(c & 0x04));
+    setPin(PLAYER_PINS[index][PIN_DOWN], !(c & 0x02));
+    setPin(PLAYER_PINS[index][PIN_UP], !(c & 0x01));
+}
+
+/**
+ * @brief Processes mouse input from a controller and sends corresponding signals.
+ *
+ * This function reads the current state of the mouse from the given controller,
+ * updates the mouse position, sets button states, and sends the appropriate signals
+ * to the MSX system. It also handles timing to ensure proper communication and resets
+ * mouse deltas after sending.
+ *
+ * @param ctl   Pointer to the controller object providing mouse input data.
+ * @param index Index of the player/controller to process (used for pin selection).
+ */
+void processMouse(ControllerPtr ctl, int index) {
+    delay_ms = DELAY_MOUSE;
+    uint16_t buttons = ctl->buttons();
+    mouse_x = mouse_x + ctl->deltaX();
+    mouse_y = mouse_y + ctl->deltaY();
+
+    setPin(PLAYER_PINS[index][PIN_A], buttons == UNI_MOUSE_BUTTON_LEFT);
+    setPin(PLAYER_PINS[index][PIN_B], buttons == UNI_MOUSE_BUTTON_RIGHT);
+
+    timer = millis() + 40;
+    sendMSX(-mouse_x, index);
+    timer = millis() + 3;
+    sendMSX(-mouse_y, index);
+    if( millis() < timer ) {
+      mouse_x = 0;
+      mouse_y = 0;
+      timer = millis() + 2;
+    } 
+    while( digitalRead( PLAYER_PINS[index][PIN_OUT] ) == LOW ) {
+      if( millis() > timer )
+        break;
+    }
+
+    setPin(PLAYER_PINS[index][PIN_UP], false);
+    setPin(PLAYER_PINS[index][PIN_DOWN], false);
+    setPin(PLAYER_PINS[index][PIN_LEFT], false);
+    setPin(PLAYER_PINS[index][PIN_RIGHT], false);
+}
+
+/**
  * @brief Initializes the BlueBuzz device and its peripherals.
  *
  * This function sets up the BP32 Bluetooth controller with connection and disconnection callbacks,
@@ -330,25 +374,34 @@ void setup() {
 }
 
 /**
- * @brief Main loop function for Arduino sketch.
+ * @brief Main loop function for processing Bluetooth controllers.
  *
- * Continuously updates the BP32 controller state and processes input data from connected gamepads.
- * If BP32 fails to update, the function waits for a predefined delay and returns early.
- * For each possible gamepad slot, checks if a controller is present, connected, and has new data,
- * then processes the input using processMSX().
- * After processing, waits for a predefined delay before the next iteration.
+ * This function is repeatedly called by the Arduino runtime. It updates the BP32 Bluetooth stack,
+ * processes input from connected controllers, and handles delays between iterations.
+ *
+ * - If BP32.update() fails, the function waits for a specified delay (if set) and returns early.
+ * - Iterates through all possible controller slots (BP32_MAX_GAMEPADS):
+ *     - For each connected controller with new data:
+ *         - If the controller is a gamepad, calls processJoystick().
+ *         - If the controller is a mouse, calls processMouse().
+ * - At the end of each loop, waits for a specified delay (if set).
  */
 void loop() {
     if (!BP32.update()) {
-        delay(DELAY);
+        if (delay_ms > 0)
+            delay(delay_ms);
         return;
     }
 
     for (int i = 0 ; i < BP32_MAX_GAMEPADS ; i++) {
         auto player = controllerList[i];
         if (player && player->isConnected() && player->hasData())
-            processMSX(player, i);
+            if (player->isGamepad())
+                processJoystick(player, i);
+            else if (player->isMouse())
+                processMouse(player, i);
     }
 
-    delay(DELAY);
+    if (delay_ms > 0)
+        delay(delay_ms);
 }
