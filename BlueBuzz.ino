@@ -1,10 +1,5 @@
 #include <Bluepad32.h>
 
-enum PlayerIndex {
-    PLAYER_1,
-    PLAYER_2
-};
-
 enum PinIndex {
   PIN_UP,
   PIN_DOWN,
@@ -294,7 +289,7 @@ void processJoystick(ControllerPtr ctl, int index) {
  */
 void sendMSX(char c, int index) {
     // Wait for OUT pin to go HIGH
-    while (digitalRead(PLAYER_PINS[PLAYER_1][PIN_OUT]) == LOW) {
+    while (digitalRead(PLAYER_PINS[index][PIN_OUT]) == LOW) {
         if (millis() > timer) return;
     }
     // Set pins for high nibble
@@ -304,7 +299,7 @@ void sendMSX(char c, int index) {
     setPin(PLAYER_PINS[index][PIN_UP], !(c & 0x10));
 
     // Wait for OUT pin to go LOW
-    while (digitalRead(PLAYER_PINS[PLAYER_1][PIN_OUT]) == HIGH) {
+    while (digitalRead(PLAYER_PINS[index][PIN_OUT]) == HIGH) {
         if (millis() > timer) return;
     }
     // Set pins for low nibble
