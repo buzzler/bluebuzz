@@ -15,15 +15,13 @@ enum PinIndex {
   PIN_OUT
 };
 
-const int PLAYER_PINS[2][7] = {
-  {23, 19, 18, 5, 22, 21, 32},
-  {4, 14, 15, 27, 26, 25, 33}
-};
-
 const int DELAY_JOYSTICK = 15;
 const int DELAY_MOUSE = 0;
-const int CONTROLLER_LIMIT = 1; // maximum 2
-ControllerPtr controllerList[BP32_MAX_GAMEPADS];
+const int PLAYER_LIMIT = 1;
+const int PLAYER_PINS[PLAYER_LIMIT][7] = {
+  {23, 19, 18, 5, 22, 21, 32}
+};
+ControllerPtr playerList[BP32_MAX_GAMEPADS];
 
 int delay_ms = DELAY_JOYSTICK;
 int controllerCount = 0;
@@ -75,7 +73,7 @@ void setPin(int pin, bool pressed) {
  * @param strengthRight Strength of the right rumble motor (default: 0x40).
  */
 void setRumble(ControllerPtr ctl, int duration = 300, uint8_t strengthLeft = 0x80, uint8_t strengthRight = 0x40) {
-    if (ctl && ctl->isConnected()) {
+    if (ctl && ctl->isConnected() && ctl->isGamepad()) {
         ctl->playDualRumble(0, duration, strengthLeft, strengthRight);
     }
 }
@@ -92,15 +90,16 @@ void setRumble(ControllerPtr ctl, int duration = 300, uint8_t strengthLeft = 0x8
  */
 void onConnectedController(ControllerPtr ctl) {
     for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-        if (controllerList[i] == nullptr) {
-            controllerList[i] = ctl;
+        if (playerList[i] == nullptr) {
+            playerList[i] = ctl;
             controllerCount++;
+            delay_ms = ctl->isMouse() ? DELAY_MOUSE : DELAY_JOYSTICK;
             setRumble(ctl);
             break;
         }
     }
 
-    if (controllerCount >= CONTROLLER_LIMIT)
+    if (controllerCount >= PLAYER_LIMIT)
         BP32.enableNewBluetoothConnections(false);
 }
 
@@ -116,14 +115,15 @@ void onConnectedController(ControllerPtr ctl) {
 void onDisconnectedController(ControllerPtr ctl) {
     auto before = controllerCount;
     for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-        if (controllerList[i] == ctl) {
-            controllerList[i] = nullptr;
+        if (playerList[i] == ctl) {
+            playerList[i] = nullptr;
             controllerCount--;
+            delay_ms = DELAY_JOYSTICK;
             break;
         }
     }
 
-    if (before != controllerCount && controllerCount < CONTROLLER_LIMIT)
+    if (before != controllerCount && controllerCount < PLAYER_LIMIT)
         BP32.enableNewBluetoothConnections(true);
 }
 
@@ -137,7 +137,7 @@ void onDisconnectedController(ControllerPtr ctl) {
  */
 void onForgetAllControllers() {
     for (int i = 0; i < BP32_MAX_GAMEPADS; i++)
-        controllerList[i] = nullptr;
+        playerList[i] = nullptr;
     controllerCount = 0;
     BP32.forgetBluetoothKeys();
     BP32.enableNewBluetoothConnections(true);
@@ -368,7 +368,7 @@ void setup() {
     BP32.forgetBluetoothKeys();
     BP32.enableVirtualDevice(false);
 
-    for (int i = 0 ; i < CONTROLLER_LIMIT ; i++)
+    for (int i = 0 ; i < PLAYER_LIMIT ; i++)
         for (int j = 0 ; j < 6 ; j++)
             setPin(PLAYER_PINS[i][j], false);
 }
@@ -394,7 +394,7 @@ void loop() {
     }
 
     for (int i = 0 ; i < BP32_MAX_GAMEPADS ; i++) {
-        auto player = controllerList[i];
+        auto player = playerList[i];
         if (player && player->isConnected() && player->hasData())
             if (player->isGamepad())
                 processJoystick(player, i);
