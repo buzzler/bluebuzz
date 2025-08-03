@@ -84,7 +84,7 @@ The following ESP32 GPIOs are mapped to MSX joystick/mouse signals:
 
 ## License
 
-This project is provided under the MIT License. See [Bluepad32](https://github.com/ricardoquesada/bluepad32) for its own licensing.
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
 ## Credits
 
