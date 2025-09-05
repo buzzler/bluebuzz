@@ -1,9 +1,9 @@
 #include <WiFi.h>
 #include <Bluepad32.h>
-#include <esp_sleep.h>
-#define INACTIVITY_TIMEOUT 120000
+#include <ESPAsyncWebServer.h>
+#include <ElegantOTA.h>
 
-enum PinIndex {
+enum Pin {
   PIN_UP,
   PIN_DOWN,
   PIN_LEFT,
@@ -14,11 +14,12 @@ enum PinIndex {
   PIN_LED
 };
 
-const int PLAYER_PINS[8] = {14, 26, 33, 32, 27, 25, 17, 18}; // ESP32 WROOM 32
-//const int PLAYER_PINS[8] = {23, 19, 18, 5, 22, 21, 33, 32}; // TinyPICO
+const int PLAYER_PINS[8] = { 14, 26, 33, 32, 27, 25, 17, 18 };
+const int DELAY_MS = 15;
+const char MOUSE_SCALE = 15;
+const char *OTA_SSID = "BlueBuzz";
+const char *OTA_PASS = "12345678";
 ControllerPtr player;
-
-int delay_ms = 15;
 bool press_up = false;
 bool press_down = false;
 bool press_left = false;
@@ -35,427 +36,587 @@ int turbo_a_counter = 0;
 int turbo_b_counter = 0;
 char mouse_x = 0;
 char mouse_y = 0;
-char scale = 15;
 uint16_t cur_buttons = 0;
 int8_t cur_wheel = 0;
 int32_t cur_deltaX, cur_deltaY = 0;
 unsigned long timer;
-unsigned long lastActivity = 0;
+AsyncWebServer server(80);
+unsigned long ota_progress_millis = 0;
+bool led_status = false;
 
-/**
- * @brief Sets the specified pin to either OUTPUT LOW or INPUT based on the pressed state.
- *
- * This function configures the given pin as an OUTPUT and sets it to LOW if the
- * pressed parameter is true. If pressed is false, the pin is configured as an INPUT.
- *
- * @param pin The pin number to configure.
- * @param pressed A boolean indicating whether the pin should be set to OUTPUT LOW (true) or INPUT (false).
- */
-void setPin(int pin, bool pressed) {
-    if (pressed) {
-        pinMode(pin, OUTPUT);
-        digitalWrite(pin, LOW);
-    } else {
-        pinMode(pin, INPUT);
-    }
+void setPin(int pin, bool pressed);
+void setRumble(int duration = 300, uint8_t strengthLeft = 0x80, uint8_t strengthRight = 0x40);
+void sendMSX(char c);
+void onOTAStart();
+void onOTAProgress(size_t current, size_t final);
+void onOTAEnd(bool success);
+void setLED(bool status);
+
+#pragma region StateMachine
+
+enum State {
+  STATE_INIT = 0,
+  STATE_PAIRING,
+  STATE_CONNECTED,
+  STATE_PLAYING_BY_GAMEPAD,
+  STATE_PLAYING_BY_KEYBOARD,
+  STATE_PLAYING_BY_MOUSE,
+  STATE_OTA,
+  STATE_ERROR,
+  STATE_NULL,
+  STATE_COUNT
+};
+
+State currentState = STATE_NULL;
+
+void onEnterInit();
+void onLoopInit();
+void onExitInit();
+
+void onEnterPairing();
+void onLoopPairing();
+void onExitPairing();
+
+void onEnterConnected();
+void onLoopConnected();
+void onExitConnected();
+
+void onEnterPlayingByGamepad();
+void onLoopPlayingByGamepad();
+void onExitPlayingByGamepad();
+
+void onEnterPlayingByKeyboard();
+void onLoopPlayingByKeyboard();
+void onExitPlayingByKeyboard();
+
+void onEnterPlayingByMouse();
+void onLoopPlayingByMouse();
+void onExitPlayingByMouse();
+
+void onEnterOTA();
+void onLoopOTA();
+void onExitOTA();
+
+void onEnterError();
+void onLoopError();
+void onExitError();
+
+void changeState(State newState) {
+  if (newState == currentState) return;
+
+  switch (currentState) {
+    case STATE_INIT: onExitInit(); break;
+    case STATE_PAIRING: onExitPairing(); break;
+    case STATE_CONNECTED: onExitConnected(); break;
+    case STATE_PLAYING_BY_GAMEPAD: onExitPlayingByGamepad(); break;
+    case STATE_PLAYING_BY_KEYBOARD: onExitPlayingByKeyboard(); break;
+    case STATE_PLAYING_BY_MOUSE: onExitPlayingByMouse(); break;
+    case STATE_OTA: onExitOTA(); break;
+    case STATE_ERROR: onExitError(); break;
+    default: break;
+  }
+
+  currentState = newState;
+
+  switch (currentState) {
+    case STATE_INIT: onEnterInit(); break;
+    case STATE_PAIRING: onEnterPairing(); break;
+    case STATE_CONNECTED: onEnterConnected(); break;
+    case STATE_PLAYING_BY_GAMEPAD: onEnterPlayingByGamepad(); break;
+    case STATE_PLAYING_BY_KEYBOARD: onEnterPlayingByKeyboard(); break;
+    case STATE_PLAYING_BY_MOUSE: onEnterPlayingByMouse(); break;
+    case STATE_OTA: onEnterOTA(); break;
+    case STATE_ERROR: onEnterError(); break;
+    default: break;
+  }
 }
 
-/**
- * @brief Triggers a rumble effect on the connected controller.
- *
- * This function activates the rumble feature of the connected controller for a specified duration
- * and strength. It checks if a controller is connected and is a gamepad before attempting to play
- * the rumble effect.
- *
- * @param duration The duration of the rumble effect in milliseconds (default is 300 ms).
- * @param strengthLeft The strength of the left rumble motor (default is 0x80).
- * @param strengthRight The strength of the right rumble motor (default is 0x40).
- */
-void setRumble(int duration = 300, uint8_t strengthLeft = 0x80, uint8_t strengthRight = 0x40) {
-    if (player && player->isConnected() && player->isGamepad()) {
-        player->playDualRumble(0, duration, strengthLeft, strengthRight);
-    }
-}
-
-
-/**
- * @brief Handles the connection of a Bluetooth controller.
- *
- * This function is called when a new controller is connected. It assigns the
- * connected controller to the player variable if it is currently null, disables
- * new Bluetooth connections, and triggers a rumble effect to indicate successful connection.
- *
- * @param ctl Pointer to the connected controller.
- */
-void onConnectedController(ControllerPtr ctl) {
-    if (player == nullptr) {
-        player = ctl;
-        Serial.printf("[BLUEBUZZ] connected\n");
-        BP32.enableNewBluetoothConnections(false);
-        setRumble();
-    }
-}
-
-/**
- * @brief Handles the disconnection of a Bluetooth controller.
- *
- * This function is called when a controller is disconnected. If the disconnected
- * controller is the current player, it sets the player variable to null and
- * enables new Bluetooth connections.
- *
- * @param ctl Pointer to the disconnected controller.
- */
-void onDisconnectedController(ControllerPtr ctl) {
-    if (player == ctl) {
-        player = nullptr;
-        Serial.printf("[BLUEBUZZ] disconnected\n");
-        BP32.enableNewBluetoothConnections(true);
-    }
-}
-
-
-/**
- * @brief Forgets all paired Bluetooth controllers and resets the player state.
- *
- * This function clears the current player controller, forgets all stored Bluetooth keys,
- * and enables new Bluetooth connections to allow pairing with new controllers.
- */
-void onForgetAllControllers() {
-    player = nullptr;
-    BP32.forgetBluetoothKeys();
-    BP32.enableNewBluetoothConnections(true);
-}
-
-/**
- * @brief Processes joystick input from a connected gamepad controller.
- *
- * This function reads the current state of the joystick from the given controller,
- * updates the corresponding MSX output pins based on button presses and joystick movements,
- * and manages the state of directional and action buttons. It also handles turbo functionality
- * for action buttons A and B.
- */
-void processJoystick() {
-    uint8_t dpad = player->dpad();
-    int32_t axisX = player->axisX();
-    int32_t axisY = player->axisY();
-    uint16_t buttons = player->buttons();
-    uint16_t misc = player->miscButtons();
-
-    if ((misc & MISC_BUTTON_SELECT) && (misc & MISC_BUTTON_START)) {
-        onForgetAllControllers();
-        return;
-    }
-
-    bool up = (dpad & DPAD_UP) || axisY < -127;
-    bool down = (dpad & DPAD_DOWN) || axisY > 127;
-    bool left = (dpad & DPAD_LEFT) || axisX < -127;
-    bool right = (dpad & DPAD_RIGHT) || axisX > 127;
-    bool a = buttons & BUTTON_A;
-    bool b = buttons & BUTTON_B;
-    bool x = buttons & BUTTON_X;
-    bool y = buttons & BUTTON_Y;
-    bool ls = buttons & BUTTON_SHOULDER_L;
-    bool rs = buttons & BUTTON_SHOULDER_R;
-    bool lt = buttons & BUTTON_TRIGGER_L;
-    bool rt = buttons & BUTTON_TRIGGER_R;
-
-    if (up != press_up) {
-        setPin(PLAYER_PINS[PIN_UP], up);
-        press_up = up;
-    }
-
-    if (down != press_down) {
-        setPin(PLAYER_PINS[PIN_DOWN], down);
-        press_down = down;
-    }
-    
-    if (left != press_left) {
-        setPin(PLAYER_PINS[PIN_LEFT], left);
-        press_left = left;
-    }
-
-    if (right != press_right) {
-        setPin(PLAYER_PINS[PIN_RIGHT], right);
-        press_right = right;
-    }
-
-    if (ls != press_ls) {
-        if (press_ls) {
-            turbo_a = turbo_a - 1;
-            if (turbo_a < 1) {
-                turbo_a = 1;
-                setRumble();
-            }
-        }
-        press_ls = ls;
-    }
-
-    if (lt != press_lt) {
-        if (press_lt) {
-            turbo_a = turbo_a + 1;
-            if (turbo_a > 10) {
-                turbo_a = 10;
-                setRumble();
-            }
-        }
-        press_lt = lt;
-    }
-
-    if (x && turbo_a > 1) {
-        turbo_a_counter++;
-        int interval = 11 - turbo_a;
-        if (turbo_a_counter >= 11 - turbo_a) {
-            a = !press_a;
-            turbo_a_counter = 0;
-        } else {
-            a = press_a;
-        }
-    } else {
-        turbo_a_counter = 0;
-    }
-
-    if (a != press_a) {
-        setPin(PLAYER_PINS[PIN_A], a);
-        press_a = a;
-    }
-
-    if (rs != press_rs) {
-        if (press_rs) {
-            turbo_b = turbo_b - 1;
-            if (turbo_b < 0) {
-                turbo_b = 0;
-                setRumble();
-            }
-        }
-        press_rs = rs;
-    }
-
-    if (rt != press_rt) {
-        if (press_rt) {
-            turbo_b = turbo_b + 1;
-            if (turbo_b > 10) {
-                turbo_b = 10;
-                setRumble();
-            }
-        }
-        press_rt = rt;
-    }
-
-    if (y && turbo_b > 1) {
-        turbo_b_counter++;
-        int interval = 11 - turbo_b;
-        if (turbo_b_counter >= interval) {
-            b = !press_b;
-            turbo_b_counter = 0;
-        } else {
-            b = press_b;
-        }
-    } else {
-        turbo_b_counter = 0;
-    }
-
-    if (b != press_b) {
-        setPin(PLAYER_PINS[PIN_B], b);
-        press_b = b;
-    }
-}
-
-/**
- * @brief Sends a character to the MSX system using the defined pin protocol.
- *
- * This function waits for the OUT pin to go HIGH, then sets the directional pins
- * according to the high nibble of the character. It then waits for the OUT pin to
- * go LOW before setting the directional pins according to the low nibble of the character.
- *
- * @param c The character to send to the MSX system.
- */
-void sendMSX(char c) {
-    // Wait for OUT pin to go HIGH
-    while (digitalRead(PLAYER_PINS[PIN_OUT]) == LOW) {
-        if (millis() > timer) return;
-    }
-    // Set pins for high nibble
-    setPin(PLAYER_PINS[PIN_RIGHT], !(c & 0x80));
-    setPin(PLAYER_PINS[PIN_LEFT], !(c & 0x40));
-    setPin(PLAYER_PINS[PIN_DOWN], !(c & 0x20));
-    setPin(PLAYER_PINS[PIN_UP], !(c & 0x10));
-
-    // Wait for OUT pin to go LOW
-    while (digitalRead(PLAYER_PINS[PIN_OUT]) == HIGH) {
-        if (millis() > timer) return;
-    }
-    // Set pins for low nibble
-    setPin(PLAYER_PINS[PIN_RIGHT], !(c & 0x08));
-    setPin(PLAYER_PINS[PIN_LEFT], !(c & 0x04));
-    setPin(PLAYER_PINS[PIN_DOWN], !(c & 0x02));
-    setPin(PLAYER_PINS[PIN_UP], !(c & 0x01));
-}
-
-/**
- * @brief Processes mouse input from a connected mouse controller.
- *
- * This function reads the current state of the mouse from the given controller,
- * updates the corresponding MSX output pins based on button presses and mouse movements,
- * and manages the state of the mouse buttons. It also handles scaling of mouse movement
- * and ensures proper timing for sending data to the MSX system.
- *
- * @param buttons The current state of mouse buttons.
- * @param wheel The scroll wheel movement.
- * @param deltaX The change in X position.
- * @param deltaY The change in Y position.
- */
-void processMouse(uint16_t buttons, int8_t wheel, int32_t deltaX, int32_t deltaY) {
-    mouse_x = mouse_x - deltaX;
-    mouse_y = mouse_y + deltaY;
-    char x = mouse_x * scale / 20;
-    char y = mouse_y * scale / 20;
-    bool bA = buttons & UNI_MOUSE_BUTTON_LEFT;
-    bool bB = buttons & UNI_MOUSE_BUTTON_RIGHT;
-    bool bC = buttons & UNI_MOUSE_BUTTON_MIDDLE;
-
-    Serial.printf("[BLUEBUZZ] X: %d, Y: %d, L: %d, R: %d, M: %d, W: %d\n", x, y, bA, bB, bC, wheel);
-
-    setPin(PLAYER_PINS[PIN_A], bA);
-    setPin(PLAYER_PINS[PIN_B], bB);
-    timer = millis() + 40;
-    sendMSX(x);
-    sendMSX(y);
-    
-    if( millis() < timer ) {
-      mouse_x = 0;
-      mouse_y = 0;
-      timer = millis() + 2;
-    } 
-    while( digitalRead( PLAYER_PINS[PIN_OUT] ) == LOW ) {
-      if( millis() > timer )
-        break;
-    }
-
-    setPin(PLAYER_PINS[PIN_UP], false);
-    setPin(PLAYER_PINS[PIN_DOWN], false);
-    setPin(PLAYER_PINS[PIN_LEFT], false);
-    setPin(PLAYER_PINS[PIN_RIGHT], false);
-}
-
-/**
- * @brief Processes keyboard input from a connected keyboard controller.
- *
- * This function reads the current state of the keyboard from the given controller,
- * updates the corresponding MSX output pins based on key presses, and manages the
- * state of directional and action buttons.
- */
-void processKeyboard() {
-    bool up = player->isKeyPressed(Keyboard_UpArrow) || player->isKeyPressed(Keyboard_W);
-    bool down = player->isKeyPressed(Keyboard_DownArrow) || player->isKeyPressed(Keyboard_S);
-    bool left = player->isKeyPressed(Keyboard_LeftArrow) || player->isKeyPressed(Keyboard_A);
-    bool right = player->isKeyPressed(Keyboard_RightArrow) || player->isKeyPressed(Keyboard_D);
-    bool a = player->isKeyPressed(Keyboard_N) || player->isKeyPressed(Keyboard_Spacebar) || player->isKeyPressed(Keyboard_Enter);
-    bool b = player->isKeyPressed(Keyboard_M) || player->isKeyPressed(Keyboard_Escape);
-
-    if (up != press_up) {
-        setPin(PLAYER_PINS[PIN_UP], up);
-        press_up = up;
-    }
-
-    if (down != press_down) {
-        setPin(PLAYER_PINS[PIN_DOWN], down);
-        press_down = down;
-    }
-    
-    if (left != press_left) {
-        setPin(PLAYER_PINS[PIN_LEFT], left);
-        press_left = left;
-    }
-
-    if (right != press_right) {
-        setPin(PLAYER_PINS[PIN_RIGHT], right);
-        press_right = right;
-    }
-
-    if (a != press_a) {
-        setPin(PLAYER_PINS[PIN_A], a);
-        press_a = a;
-    }
-
-    if (b != press_b) {
-        setPin(PLAYER_PINS[PIN_B], b);
-        press_b = b;
-    }
-}
-
-/**
- * @brief Initializes the BlueBuzz system and configures pins.
- *
- * This function is called once at the start of the program. It initializes
- * serial communication, configures WiFi settings, sets CPU frequency,
- * initializes the BP32 Bluetooth stack, and configures the player pins.
- */
 void setup() {
-    Serial.begin(115200);
-    Serial.println("[BLUEBUZZ] READY!");
-
-    WiFi.mode(WIFI_OFF);
-    setCpuFrequencyMhz(80);
-
-    BP32.setup(&onConnectedController, &onDisconnectedController);
-    BP32.forgetBluetoothKeys();
-    BP32.enableVirtualDevice(false);
-
-    for (int i = 0 ; i < 7 ; i++)
-        setPin(PLAYER_PINS[i], false);
-    pinMode(PLAYER_PINS[PIN_LED], OUTPUT);
+  Serial.begin(115200);
+  while (!Serial.availableForWrite())
+    delay(100);
+  changeState(STATE_INIT);
 }
 
-/**
- * @brief Main loop that handles controller input and updates MSX output pins.
- *
- * This function runs continuously after setup. It checks for connected controllers,
- * processes input from the connected controller (mouse, joystick, or keyboard),
- * and updates the MSX output pins accordingly. It also manages inactivity timeout
- * and puts the ESP32 into light sleep mode when inactive.
- */
 void loop() {
-    if (!player || !player->isConnected()) {
-        digitalWrite(PLAYER_PINS[PIN_LED], HIGH);
-        delay(200);
-        digitalWrite(PLAYER_PINS[PIN_LED], LOW);
-        delay(200);
-        return;
+  switch (currentState) {
+    case STATE_INIT: onLoopInit(); break;
+    case STATE_PAIRING: onLoopPairing(); break;
+    case STATE_CONNECTED: onLoopConnected(); break;
+    case STATE_PLAYING_BY_GAMEPAD: onLoopPlayingByGamepad(); break;
+    case STATE_PLAYING_BY_KEYBOARD: onLoopPlayingByKeyboard(); break;
+    case STATE_PLAYING_BY_MOUSE: onLoopPlayingByMouse(); break;
+    case STATE_OTA: onLoopOTA(); break;
+    case STATE_ERROR: onLoopError(); break;
+    default: break;
+  }
+}
+
+#pragma endregion
+
+// INIT
+void onEnterInit() {
+  Serial.println("Enter INIT");
+
+  WiFi.mode(WIFI_OFF);
+  setCpuFrequencyMhz(80);
+
+  BP32.setup(&onConnectedController, &onDisconnectedController);
+  BP32.forgetBluetoothKeys();
+  BP32.enableVirtualDevice(false);
+
+  for (int i = 0; i < 7; i++)
+    setPin(PLAYER_PINS[i], false);
+  pinMode(PLAYER_PINS[PIN_LED], OUTPUT);
+}
+void onLoopInit() {
+  changeState(STATE_PAIRING);
+}
+void onExitInit() {
+  Serial.println("Exit INIT");
+}
+
+// PAIRING
+void onEnterPairing() {
+  Serial.println("Enter PAIRING");
+  player = nullptr;
+  BP32.forgetBluetoothKeys();
+  BP32.enableNewBluetoothConnections(true);
+}
+void onLoopPairing() {
+  BP32.update();
+  setLED(true);
+  delay(200);
+  setLED(false);
+  delay(200);
+}
+void onExitPairing() {
+  Serial.println("Exit PAIRING");
+  BP32.enableNewBluetoothConnections(false);
+}
+
+// CONNECTED
+void onEnterConnected() {
+  Serial.println("Enter CONNECTED");
+}
+void onLoopConnected() {
+  setLED(true);
+  
+  if (!BP32.update()) {
+    delay(DELAY_MS);
+    return;
+  }
+
+  if (player && player->isConnected()) {
+    if (player->hasData()) {
+      if (player->isGamepad())
+        changeState(STATE_PLAYING_BY_GAMEPAD);
+      else if (player->isKeyboard())
+        changeState(STATE_PLAYING_BY_KEYBOARD);
+      else if (player->isMouse())
+        changeState(STATE_PLAYING_BY_MOUSE);
+    }
+  }
+}
+void onExitConnected() {
+  Serial.println("Exit CONNECTED");
+}
+
+// PLAYING BY GAMEPAD
+void onEnterPlayingByGamepad() {
+  Serial.println("Enter PLAYING_BY_GAMEPAD");
+}
+void onLoopPlayingByGamepad() {
+  setLED(true);
+
+  if (!BP32.update()) {
+    delay(DELAY_MS);
+    return;
+  }
+
+  if (!(player->hasData()))
+    return;
+
+  uint8_t dpad = player->dpad();
+  int32_t axisX = player->axisX();
+  int32_t axisY = player->axisY();
+  uint16_t buttons = player->buttons();
+  uint16_t misc = player->miscButtons();
+
+  bool up = (dpad & DPAD_UP) || axisY < -127;
+  bool down = (dpad & DPAD_DOWN) || axisY > 127;
+  bool left = (dpad & DPAD_LEFT) || axisX < -127;
+  bool right = (dpad & DPAD_RIGHT) || axisX > 127;
+  bool a = buttons & BUTTON_A;
+  bool b = buttons & BUTTON_B;
+  bool x = buttons & BUTTON_X;
+  bool y = buttons & BUTTON_Y;
+  bool ls = buttons & BUTTON_SHOULDER_L;
+  bool rs = buttons & BUTTON_SHOULDER_R;
+  bool lt = buttons & BUTTON_TRIGGER_L;
+  bool rt = buttons & BUTTON_TRIGGER_R;
+
+  if ((misc & MISC_BUTTON_SELECT) && (misc & MISC_BUTTON_START)) {
+    if (up)
+      changeState(STATE_PAIRING);
+    else if (down)
+      changeState(STATE_OTA);
+  }
+
+  if (up != press_up) {
+    setPin(PLAYER_PINS[PIN_UP], up);
+    press_up = up;
+  }
+
+  if (down != press_down) {
+    setPin(PLAYER_PINS[PIN_DOWN], down);
+    press_down = down;
+  }
+
+  if (left != press_left) {
+    setPin(PLAYER_PINS[PIN_LEFT], left);
+    press_left = left;
+  }
+
+  if (right != press_right) {
+    setPin(PLAYER_PINS[PIN_RIGHT], right);
+    press_right = right;
+  }
+
+  if (ls != press_ls) {
+    if (press_ls) {
+      turbo_a = turbo_a - 1;
+      if (turbo_a < 1) {
+        turbo_a = 1;
+        setRumble();
+      }
+    }
+    press_ls = ls;
+  }
+
+  if (lt != press_lt) {
+    if (press_lt) {
+      turbo_a = turbo_a + 1;
+      if (turbo_a > 10) {
+        turbo_a = 10;
+        setRumble();
+      }
+    }
+    press_lt = lt;
+  }
+
+  if (x && turbo_a > 1) {
+    turbo_a_counter++;
+    int interval = 11 - turbo_a;
+    if (turbo_a_counter >= 11 - turbo_a) {
+      a = !press_a;
+      turbo_a_counter = 0;
     } else {
-        digitalWrite(PLAYER_PINS[PIN_LED], HIGH);
+      a = press_a;
     }
+  } else {
+    turbo_a_counter = 0;
+  }
 
-    if (player && player->isMouse() && player->isConnected()) {
-        if (BP32.update()) {
-            cur_buttons = player->buttons();
-            cur_wheel = player->scrollWheel();
-            cur_deltaX = player->deltaX();
-            cur_deltaY = player->deltaY();
-        } else {
-            cur_wheel = 0;
-            cur_deltaX = 0;
-            cur_deltaY = 0;
-        }
-        processMouse(cur_buttons, cur_wheel, cur_deltaX, cur_deltaY);
-        return;
-    }
+  if (a != press_a) {
+    setPin(PLAYER_PINS[PIN_A], a);
+    press_a = a;
+  }
 
-    if (!BP32.update()) {
-        delay(delay_ms);
-        return;
+  if (rs != press_rs) {
+    if (press_rs) {
+      turbo_b = turbo_b - 1;
+      if (turbo_b < 0) {
+        turbo_b = 0;
+        setRumble();
+      }
     }
+    press_rs = rs;
+  }
 
-    if (player && player->isConnected()) {
-        if (player->hasData()) {
-            if (player->isGamepad())
-                processJoystick();
-            else if (player->isKeyboard())
-                processKeyboard();
-            lastActivity = millis();
-        } else if (millis() - lastActivity > INACTIVITY_TIMEOUT) {
-            esp_sleep_enable_timer_wakeup(100000);
-            esp_light_sleep_start();
-        }
+  if (rt != press_rt) {
+    if (press_rt) {
+      turbo_b = turbo_b + 1;
+      if (turbo_b > 10) {
+        turbo_b = 10;
+        setRumble();
+      }
     }
-    delay(delay_ms);
+    press_rt = rt;
+  }
+
+  if (y && turbo_b > 1) {
+    turbo_b_counter++;
+    int interval = 11 - turbo_b;
+    if (turbo_b_counter >= interval) {
+      b = !press_b;
+      turbo_b_counter = 0;
+    } else {
+      b = press_b;
+    }
+  } else {
+    turbo_b_counter = 0;
+  }
+
+  if (b != press_b) {
+    setPin(PLAYER_PINS[PIN_B], b);
+    press_b = b;
+  }
+}
+void onExitPlayingByGamepad() {
+  Serial.println("Exit PLAYING_BY_GAMEPAD");
+}
+
+// PLAYING BY KEYBOARD
+void onEnterPlayingByKeyboard() {
+  Serial.println("Enter PLAYING_BY_KEYBOARD");
+}
+void onLoopPlayingByKeyboard() {
+  setLED(true);
+
+  if (!BP32.update()) {
+    delay(DELAY_MS);
+    return;
+  }
+
+  if (!(player->hasData()))
+    return;
+
+  bool up = player->isKeyPressed(Keyboard_UpArrow) || player->isKeyPressed(Keyboard_W);
+  bool down = player->isKeyPressed(Keyboard_DownArrow) || player->isKeyPressed(Keyboard_S);
+  bool left = player->isKeyPressed(Keyboard_LeftArrow) || player->isKeyPressed(Keyboard_A);
+  bool right = player->isKeyPressed(Keyboard_RightArrow) || player->isKeyPressed(Keyboard_D);
+  bool a = player->isKeyPressed(Keyboard_N) || player->isKeyPressed(Keyboard_Spacebar) || player->isKeyPressed(Keyboard_Enter);
+  bool b = player->isKeyPressed(Keyboard_M) || player->isKeyPressed(Keyboard_Escape);
+
+  if (up != press_up) {
+    setPin(PLAYER_PINS[PIN_UP], up);
+    press_up = up;
+  }
+
+  if (down != press_down) {
+    setPin(PLAYER_PINS[PIN_DOWN], down);
+    press_down = down;
+  }
+
+  if (left != press_left) {
+    setPin(PLAYER_PINS[PIN_LEFT], left);
+    press_left = left;
+  }
+
+  if (right != press_right) {
+    setPin(PLAYER_PINS[PIN_RIGHT], right);
+    press_right = right;
+  }
+
+  if (a != press_a) {
+    setPin(PLAYER_PINS[PIN_A], a);
+    press_a = a;
+  }
+
+  if (b != press_b) {
+    setPin(PLAYER_PINS[PIN_B], b);
+    press_b = b;
+  }
+}
+void onExitPlayingByKeyboard() {
+  Serial.println("Exit PLAYING_BY_KEYBOARD");
+}
+
+// PLAYING BY MOUSE
+void onEnterPlayingByMouse() {
+  Serial.println("Enter PLAYING_BY_MOUSE");
+}
+void onLoopPlayingByMouse() {
+  setLED(true);
+
+  if (BP32.update()) {
+    cur_buttons = player->buttons();
+    cur_wheel = player->scrollWheel();
+    cur_deltaX = player->deltaX();
+    cur_deltaY = player->deltaY();
+  } else {
+    cur_wheel = 0;
+    cur_deltaX = 0;
+    cur_deltaY = 0;
+  }
+
+  mouse_x = mouse_x - cur_deltaX;
+  mouse_y = mouse_y + cur_deltaY;
+  char x = mouse_x * MOUSE_SCALE / 20;
+  char y = mouse_y * MOUSE_SCALE / 20;
+  bool bA = cur_buttons & UNI_MOUSE_BUTTON_LEFT;
+  bool bB = cur_buttons & UNI_MOUSE_BUTTON_RIGHT;
+  bool bC = cur_buttons & UNI_MOUSE_BUTTON_MIDDLE;
+
+  Serial.printf("[BLUEBUZZ] X: %d, Y: %d, L: %d, R: %d, M: %d, W: %d\n", x, y, bA, bB, bC, cur_wheel);
+
+  setPin(PLAYER_PINS[PIN_A], bA);
+  setPin(PLAYER_PINS[PIN_B], bB);
+  timer = millis() + 40;
+  sendMSX(x);
+  sendMSX(y);
+
+  if (millis() < timer) {
+    mouse_x = 0;
+    mouse_y = 0;
+    timer = millis() + 2;
+  }
+  while (digitalRead(PLAYER_PINS[PIN_OUT]) == LOW) {
+    if (millis() > timer)
+      break;
+  }
+
+  setPin(PLAYER_PINS[PIN_UP], false);
+  setPin(PLAYER_PINS[PIN_DOWN], false);
+  setPin(PLAYER_PINS[PIN_LEFT], false);
+  setPin(PLAYER_PINS[PIN_RIGHT], false);
+}
+void onExitPlayingByMouse() {
+  Serial.println("Exit PLAYING_BY_MOUSE");
+}
+
+// OTA
+void onEnterOTA() {
+  player = nullptr;
+  BP32.forgetBluetoothKeys();
+  BP32.enableNewBluetoothConnections(false);
+  BP32.enableBLEService(false);
+
+  IPAddress local_ip(192, 168, 1, 1);
+  IPAddress gateway(192, 168, 1, 1);
+  IPAddress subnet(255, 255, 255, 0);
+
+  Serial.println("Enter OTA");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_AP);
+  if (!WiFi.softAPConfig(local_ip, gateway, subnet)) {
+    changeState(STATE_ERROR);
+    return;
+  }
+  if (!WiFi.softAP(OTA_SSID)) {
+    changeState(STATE_ERROR);
+    return;
+  }
+  Serial.printf("SSID : %s\n", OTA_SSID);
+  Serial.printf("AP : %s\n", WiFi.softAPIP().toString());
+  Serial.printf("connect to http://%s/update\n", WiFi.softAPIP().toString());
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->redirect("/update");
+  });
+  ElegantOTA.begin(&server);
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+  server.begin();
+  Serial.println("HTTP server started");
+}
+void onLoopOTA() {
+  ElegantOTA.loop();
+  setLED(true);
+  delay(200);
+  setLED(false);
+  delay(1000);
+}
+void onExitOTA() {
+  Serial.println("Exit OTA");
+}
+
+// ERROR
+void onEnterError() {
+  Serial.println("Enter ERROR");
+}
+void onLoopError() {
+  changeState(STATE_PAIRING);
+}
+void onExitError() {
+  Serial.println("Exit ERROR");
+}
+
+void setPin(int pin, bool pressed) {
+  if (pressed) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+  } else {
+    pinMode(pin, INPUT);
+  }
+}
+
+void setRumble(int duration, uint8_t strengthLeft, uint8_t strengthRight) {
+  if (player && player->isConnected() && player->isGamepad()) {
+    player->playDualRumble(0, duration, strengthLeft, strengthRight);
+  }
+}
+
+void onConnectedController(ControllerPtr ctl) {
+  if (player == nullptr) {
+    player = ctl;
+    Serial.printf("[BLUEBUZZ] connected\n");
+    setRumble();
+    changeState(STATE_CONNECTED);
+  }
+}
+
+void onDisconnectedController(ControllerPtr ctl) {
+  if (player == ctl) {
+    player = nullptr;
+    Serial.printf("[BLUEBUZZ] disconnected\n");
+    if (currentState == STATE_CONNECTED || currentState == STATE_PLAYING_BY_GAMEPAD || currentState == STATE_PLAYING_BY_KEYBOARD || currentState == STATE_PLAYING_BY_MOUSE)
+      changeState(STATE_PAIRING);
+  }
+}
+
+void sendMSX(char c) {
+  // Wait for OUT pin to go HIGH
+  while (digitalRead(PLAYER_PINS[PIN_OUT]) == LOW) {
+    if (millis() > timer) return;
+  }
+  // Set pins for high nibble
+  setPin(PLAYER_PINS[PIN_RIGHT], !(c & 0x80));
+  setPin(PLAYER_PINS[PIN_LEFT], !(c & 0x40));
+  setPin(PLAYER_PINS[PIN_DOWN], !(c & 0x20));
+  setPin(PLAYER_PINS[PIN_UP], !(c & 0x10));
+
+  // Wait for OUT pin to go LOW
+  while (digitalRead(PLAYER_PINS[PIN_OUT]) == HIGH) {
+    if (millis() > timer) return;
+  }
+  // Set pins for low nibble
+  setPin(PLAYER_PINS[PIN_RIGHT], !(c & 0x08));
+  setPin(PLAYER_PINS[PIN_LEFT], !(c & 0x04));
+  setPin(PLAYER_PINS[PIN_DOWN], !(c & 0x02));
+  setPin(PLAYER_PINS[PIN_UP], !(c & 0x01));
+}
+
+void onOTAStart() {
+  // Log when OTA has started
+  Serial.println("OTA update started!");
+  // <Add your own code here>
+}
+
+void onOTAProgress(size_t current, size_t final) {
+  // Log every 1 second
+  if (millis() - ota_progress_millis > 1000) {
+    ota_progress_millis = millis();
+    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+  }
+}
+
+void onOTAEnd(bool success) {
+  // Log when OTA has finished
+  if (success) {
+    Serial.println("OTA update finished successfully!");
+  } else {
+    Serial.println("There was an error during OTA update!");
+  }
+  // <Add your own code here>
+}
+
+void setLED(bool status) {
+  if (led_status == status)
+    return;
+
+  led_status = status;
+  digitalWrite(PLAYER_PINS[PIN_LED], led_status ? HIGH : LOW);
 }
