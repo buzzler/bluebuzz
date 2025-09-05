@@ -42,6 +42,8 @@ Default pin mapping for ESP32 WROOM 32 (see `PLAYER_PINS` in the code):
 
 > Adjust the `PLAYER_PINS` array in the code for your board or wiring.
 
+![schematic](./KiCad/schematic.png)
+
 ---
 
 ## Software Requirements
@@ -114,5 +116,6 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 - [Bluepad32](https://github.com/ricardoquesada/bluepad32) by Ricardo Quesada
 
 ---
+
 
 Enjoy wireless gaming and mouse control on your MSX with modern
