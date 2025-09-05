@@ -14,8 +14,8 @@ enum PinIndex {
   PIN_LED
 };
 
-const int PLAYER_PINS[7] = {14, 26, 33, 32, 27, 25, 17, 18}; // ESP32 WROOM 32
-//const int PLAYER_PINS[7] = {23, 19, 18, 5, 22, 21, 33, 32}; // TinyPICO
+const int PLAYER_PINS[8] = {14, 26, 33, 32, 27, 25, 17, 18}; // ESP32 WROOM 32
+//const int PLAYER_PINS[8] = {23, 19, 18, 5, 22, 21, 33, 32}; // TinyPICO
 ControllerPtr player;
 
 int delay_ms = 15;
