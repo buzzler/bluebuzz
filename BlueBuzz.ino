@@ -281,22 +281,74 @@ void onLoopGamepadMode();
  */
 void onExitGamepadMode();
 
+/**
+ * @brief Handles the transition or initialization required when entering Keyboard mode.
+ */
 void onEnterKeyboardMode();
+
+/**
+ * @brief Handles the main loop logic when the device is operating in Keyboard mode.
+ */
 void onLoopKeyboardMode();
+
+/**
+ * @brief Handles the actions required when exiting the keyboard mode.
+ */
 void onExitKeyboardMode();
 
+/**
+ * @brief Handles the transition or initialization required when entering Mouse mode.
+ */
 void onEnterMouseMode();
+
+/**
+ * @brief Handles the main loop logic when the device is operating in Mouse mode.
+ */
 void onLoopMouseMode();
+
+/**
+ * @brief Handles the actions required when exiting the mouse mode.
+ */
 void onExitMouseMode();
 
+/**
+ * @brief Handles the transition or initialization required when entering OTA mode.
+ */
 void onEnterOTA();
+
+/**
+ * @brief Handles the main loop logic when the device is operating in OTA mode.
+ */
 void onLoopOTA();
+
+/**
+ * @brief Handles the actions required when exiting the OTA mode.
+ */
 void onExitOTA();
 
+/**
+ * @brief Handles the transition or initialization required when entering Error mode.
+ */
 void onEnterError();
+
+/**
+ * @brief Handles the main loop logic when the device is operating in Error mode.
+ */
 void onLoopError();
+
+/**
+ * @brief Handles the actions required when exiting the Error mode.
+ */
 void onExitError();
 
+/**
+ * @brief Changes the current state of the state machine to a new state.
+ *
+ * This function handles the transition between states by calling the appropriate
+ * exit and entry functions for the current and new states, respectively.
+ *
+ * @param newState The new state to transition to.
+ */
 void changeState(State newState) {
   if (newState == currentState) return;
 
@@ -327,6 +379,9 @@ void changeState(State newState) {
   }
 }
 
+/**
+ * @brief The main setup function for initializing the system.
+ */
 void setup() {
   Serial.begin(115200);
   while (!Serial.availableForWrite())
@@ -334,6 +389,12 @@ void setup() {
   changeState(STATE_INIT);
 }
 
+/**
+ * @brief The main loop function that runs continuously after setup.
+ *
+ * This function checks the current state and calls the corresponding loop
+ * handler function for that state.
+ */
 void loop() {
   switch (currentState) {
     case STATE_INIT: onLoopInit(); break;

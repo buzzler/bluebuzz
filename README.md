@@ -1,121 +1,129 @@
-# BlueBuzz for MSX (ESP32 Edition)
+# BlueBuzz
 
-**BlueBuzz** is an ESP32-based adapter that enables wireless gamepad, mouse, and keyboard input for MSX computers via Bluetooth. It uses the [Bluepad32](https://github.com/ricardoquesada/bluepad32) library for Bluetooth HID support and maps controller input to the MSX joystick/mouse port.
-
----
+BlueBuzz is an ESP32-based controller that bridges Bluetooth Gamepads, Keyboards, and Mice to MSX computers via GPIO pins. It supports multiple input modes and can be updated over-the-air (OTA).
 
 ## Features
 
-- **Bluetooth Gamepad Support:** Connect modern Bluetooth controllers (Xbox, PlayStation, 8BitDo, etc.) and use them as MSX joysticks.
-- **Bluetooth Mouse Support:** Use Bluetooth mice for full MSX mouse compatibility.
-- **Bluetooth Keyboard Support:** Use a Bluetooth keyboard as an MSX joystick.
-- **Turbo (Rapid Fire):** Adjustable turbo for A/B buttons, controlled by shoulder/trigger buttons.
-- **Rumble Feedback:** Controller vibration when turbo speed limits are reached.
-- **Auto Sleep:** ESP32 enters sleep mode after inactivity.
-- **Bluetooth Key Management:** Press SELECT + START to clear all Bluetooth pairings.
-
----
+- **Multi-Mode Support**:
+  - Gamepad mode with turbo buttons
+  - Keyboard mode for MSX keyboard emulation
+  - Mouse mode for MSX mouse support
+- **Bluetooth Connectivity**:
+  - Automatic pairing with Bluetooth controllers
+  - Support for multiple controller types
+- **OTA Updates**: Over-the-air firmware updates via web interface
+- **Rumble Feedback**: Vibration feedback for gamepad input
+- **LED Indicators**: Visual status feedback
 
 ## Hardware Requirements
 
-- **ESP32 development board** (e.g., WROOM, TinyPICO)
-- **MSX computer** (with joystick/mouse port)
-- **Level shifter** (recommended for safe 3.3V ↔ 5V interfacing)
-- **Wiring** to connect ESP32 GPIOs to the MSX DB9 port
+- ESP32 development board
+- Bluetooth controller (compatible with Bluepad32)
+- MSX computer with GPIO expansion capability
+- 10kΩ pull-up resistors for buttons (if needed)
 
----
+## Pin Configuration
 
-## Pin Mapping
+| Function | GPIO |
+|----------|------|
+| UP Button | 14 |
+| DOWN Button | 26 |
+| LEFT Button | 33 |
+| RIGHT Button | 32 |
+| A Button | 27 |
+| B Button | 25 |
+| OUT Signal | 17 |
+| LED Indicator | 18 |
 
-Default pin mapping for ESP32 WROOM 32 (see `PLAYER_PINS` in the code):
+## Modes of Operation
 
-| MSX Signal | ESP32 GPIO | Description         |
-|------------|------------|---------------------|
-| UP         | 14         | Direction/Mouse D3  |
-| DOWN       | 26         | Direction/Mouse D2  |
-| LEFT       | 33         | Direction/Mouse D1  |
-| RIGHT      | 32         | Direction/Mouse D0  |
-| A          | 27         | Button A/Mouse Left |
-| B          | 25         | Button B/Mouse Right|
-| OUT        | 17         | OUT/Strobe          |
-| LED        | 18         | Status LED          |
+### Gamepad Mode
+- Supports standard gamepad controls
+- Turbo buttons (L1/R1) for adjustable rapid fire
+- D-Pad and analog stick support
 
-> Adjust the `PLAYER_PINS` array in the code for your board or wiring.
+### Keyboard Mode
+- Emulates MSX keyboard input
+- Arrow keys and WASD for movement
+- N/Space/Enter for action buttons
+- M/Esc for secondary actions
 
-![schematic](./KiCad/schematic.png)
+### Mouse Mode
+- Converts controller mouse movements to MSX mouse input
+- Button mapping for left/right/middle clicks
+- Scroll wheel support
 
----
+## Setup Instructions
 
-## Software Requirements
+1. Install required libraries:
+   - ESP32 Board Support
+   - Bluepad32
+   - ESPAsyncWebServer
+   - ElegantOTA
 
-- [Arduino IDE](https://www.arduino.cc/en/software)
-- [Bluepad32 library](https://github.com/ricardoquesada/bluepad32)
-- ESP32 board support for Arduino
+2. Upload firmware to ESP32 board
 
----
+3. Connect to WiFi network "BlueBuzz" (default password: none)
 
-## Installation & Setup
-
-1. **Copy the Project:**
-    - Place `BlueBuzz.ino` in your Arduino sketch directory.
-
-2. **Install Bluepad32:**
-    - Follow the [Bluepad32 GitHub instructions](https://github.com/ricardoquesada/bluepad32) to install the library.
-
-3. **Configure Board:**
-    - Select your ESP32 board in the Arduino IDE.
-    - Edit `PLAYER_PINS` in the code if needed.
-
-4. **Connect Hardware:**
-    - Wire ESP32 GPIOs to the MSX joystick/mouse port according to the pin mapping.
-    - Use a level shifter if necessary.
-
-5. **Upload Firmware:**
-    - Compile and upload `BlueBuzz.ino` to your ESP32.
-
-6. **Pair Bluetooth Controller:**
-    - Put your controller, mouse, or keyboard in pairing mode.
-    - The ESP32 will automatically pair and manage connections.
-
----
+4. Access OTA update interface at `http://192.168.1.1/update`
 
 ## Usage
 
-- **Gamepad Mode:** Use the D-pad, analog sticks, and buttons as an MSX joystick.
-- **Turbo:** Hold X (for A) or Y (for B) to enable turbo. Adjust turbo speed with shoulder/trigger buttons.
-- **Mouse Mode:** Move the mouse and click buttons for MSX mouse input (data sent as two's complement 8-bit values).
-- **Keyboard Mode:** Use arrow keys/WASD for directions, N/Space/Enter for A, M/Esc for B.
-- **Forget Controllers:** Press SELECT + START simultaneously to clear all paired devices.
+### Connecting Controllers
+1. Power on BlueBuzz
+2. Press and hold SELECT+START on controller for 3 seconds to enter pairing mode
+3. Pair with your Bluetooth controller
 
----
+### Switching Modes
+- **Pairing Mode**: SELECT + START (up)
+- **OTA Update**: SELECT + START (down)
 
-## MSX Mouse Signal Details
+## Technical Details
 
-- **UP/DOWN/LEFT/RIGHT (pins 1–4):** Carry 4 bits of mouse data (X/Y movement, two's complement, 8 bits total per axis).
-- **A/B (pins 6,7):** Mouse left/right button state.
-- **OUT (pin 9):** Strobe/clock signal from MSX to request data.
+### State Machine
+The device uses a state machine to manage different operational modes:
+1. INIT - System initialization
+2. PAIRING - Bluetooth pairing mode
+3. CONNECTED - Waiting for controller connection
+4. GAMEPAD - Gamepad input processing
+5. KEYBOARD - Keyboard input processing
+6. MOUSE - Mouse input processing
+7. OTA - Over-the-air update mode
+8. ERROR - Error handling
 
----
+### Input Processing
+- Gamepad: Direct button mapping with turbo functionality
+- Keyboard: Key mapping to MSX keyboard codes
+- Mouse: Relative movement conversion to MSX mouse commands
+
+### Power Management
+- CPU frequency set to 80MHz for stability
+- Efficient power usage in idle states
 
 ## Troubleshooting
 
-- **No Input on MSX:** Check wiring, pin mapping, and level shifting.
-- **Bluetooth Pairing Issues:** Use the forget controllers feature or reset the ESP32.
-- **Laggy Input:** Adjust `delay_ms` in the code for optimal performance.
+### Common Issues
+1. **Controller not connecting**:
+   - Ensure device is in pairing mode (LED blinking)
+   - Check Bluetooth compatibility
+   - Try forgetting previous connections
 
----
+2. **No input detection**:
+   - Verify pin connections
+   - Confirm controller is properly paired
+   - Check MSX GPIO configuration
+
+3. **OTA Update fails**:
+   - Ensure stable WiFi connection
+   - Verify correct firmware file
+   - Check available storage space
 
 ## License
 
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
----
+## Acknowledgments
 
-## Credits
-
-- [Bluepad32](https://github.com/ricardoquesada/bluepad32) by Ricardo Quesada
-
----
-
-
-Enjoy wireless gaming and mouse control on your MSX with modern
+- Uses Bluepad32 library for Bluetooth controller support
+- ESPAsyncWebServer and ElegantOTA for OTA updates
+- Inspired by MSX computing community projects
