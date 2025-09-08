@@ -35,6 +35,8 @@ BlueBuzz is an ESP32-based controller that bridges Bluetooth Gamepads, Keyboards
 | OUT Signal | 17 |
 | LED Indicator | 18 |
 
+![schematic](./KiCad/schematic.png)
+
 ## Modes of Operation
 
 ### Gamepad Mode
@@ -126,4 +128,5 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
 - Uses Bluepad32 library for Bluetooth controller support
 - ESPAsyncWebServer and ElegantOTA for OTA updates
+
 - Inspired by MSX computing community projects
