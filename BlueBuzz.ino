@@ -551,6 +551,7 @@ void onLoopGamepadMode() {
 
   if (ls != press.ls) {
     if (press.ls) {
+      turbo.a_counter = 0;
       turbo.a = turbo.a - 1;
       if (turbo.a < 1) {
         turbo.a = 1;
@@ -562,6 +563,7 @@ void onLoopGamepadMode() {
 
   if (lt != press.lt) {
     if (press.lt) {
+      turbo.a_counter = 0;
       turbo.a = turbo.a + 1;
       if (turbo.a > 10) {
         turbo.a = 10;
@@ -591,6 +593,7 @@ void onLoopGamepadMode() {
 
   if (rs != press.rs) {
     if (press.rs) {
+      turbo.b_counter = 0;
       turbo.b = turbo.b - 1;
       if (turbo.b < 0) {
         turbo.b = 0;
@@ -602,6 +605,7 @@ void onLoopGamepadMode() {
 
   if (rt != press.rt) {
     if (press.rt) {
+      turbo.b_counter = 0;
       turbo.b = turbo.b + 1;
       if (turbo.b > 10) {
         turbo.b = 10;
